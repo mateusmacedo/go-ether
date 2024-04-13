@@ -8,26 +8,22 @@ import (
 	"time"
 )
 
-// Result represents the result of a job
 type Result struct {
 	WorkerID int
 	JobID    int
 	Data     interface{}
 }
 
-// Job represents a job to be executed
 type Job struct {
 	ID      int
 	Execute func(context.Context) (interface{}, error)
 }
 
-// Worker represents a worker that can execute jobs
 type Worker struct {
 	ID int
 	wg *sync.WaitGroup
 }
 
-// Start starts the worker
 func (w *Worker) Start(ctx context.Context, jobs <-chan Job, results chan<- Result, errs chan<- error) {
 	go func() {
 		for {
@@ -53,7 +49,6 @@ func (w *Worker) Start(ctx context.Context, jobs <-chan Job, results chan<- Resu
 	}()
 }
 
-// NewWorker creates a new worker
 func NewWorker(number int, wg *sync.WaitGroup) Worker {
 	return Worker{
 		ID: number,
@@ -61,7 +56,6 @@ func NewWorker(number int, wg *sync.WaitGroup) Worker {
 	}
 }
 
-// WorkerPool sends the jobs to available workers
 type WorkerPool struct {
 	jobs       chan Job
 	results    chan Result
@@ -71,7 +65,6 @@ type WorkerPool struct {
 	wg         sync.WaitGroup
 }
 
-// NewWorkerPool creates a new dispatcher
 func NewWorkerPool(maxWorkers, bufferSize int) *WorkerPool {
 	return &WorkerPool{
 		jobs:       make(chan Job, bufferSize),
@@ -82,7 +75,6 @@ func NewWorkerPool(maxWorkers, bufferSize int) *WorkerPool {
 	}
 }
 
-// Run starts the dispatcher
 func (wp *WorkerPool) Run(ctx context.Context) {
 	for i := 0; i < wp.maxWorkers; i++ {
 		worker := NewWorker(i+1, &wp.wg)
@@ -93,13 +85,11 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 	}
 }
 
-// SubmitJob adds a job to the dispatcher
 func (wp *WorkerPool) SubmitJob(job Job) {
 	wp.wg.Add(1)
 	wp.jobs <- job
 }
 
-// Wait waits for all jobs to be processed
 func (wp *WorkerPool) Wait() {
 	wp.wg.Wait()
 }
@@ -131,7 +121,7 @@ func main() {
 	workerpool.Run(ctx)
 
 	for i := 1; i <= 30; i++ {
-		jobNum := i // new variable to capture each job number correctly
+		jobNum := i
 		job := Job{
 			ID: i,
 			Execute: func(jobctx context.Context) (interface{}, error) {
@@ -147,7 +137,7 @@ func main() {
 		fmt.Printf("Job %d queued\n", i)
 	}
 
-	workerpool.Wait() // wait for all jobs to be processed
+	workerpool.Wait()
 	workerpool.Close()
 	fmt.Println("All jobs processed")
 }
