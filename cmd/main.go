@@ -148,5 +148,6 @@ func main() {
 	}
 
 	workerpool.Wait() // wait for all jobs to be processed
+	workerpool.Close()
 	fmt.Println("All jobs processed")
 }
