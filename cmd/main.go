@@ -7,10 +7,16 @@ import (
 	"time"
 )
 
+// Result represents the result of a job
+type Result struct {
+    JobID int
+    Data  interface{}
+}
+
 // Job represents a job to be executed
 type Job struct {
     ID      int
-    Process func(context.Context) error
+    Process func(context.Context) (interface{}, error)
 }
 
 // Worker represents a worker that can execute jobs
@@ -20,7 +26,7 @@ type Worker struct {
 }
 
 // Start starts the worker
-func (w *Worker) Start(ctx context.Context, jobs <-chan Job, errs chan<- error) {
+func (w *Worker) Start(ctx context.Context, jobs <-chan Job, results chan<- Result, errs chan<- error) {
     go func() {
         for {
             select {
@@ -30,12 +36,13 @@ func (w *Worker) Start(ctx context.Context, jobs <-chan Job, errs chan<- error) 
                     return // exit if jobs channel is closed
                 }
                 fmt.Printf("Worker %d started job %d\n", w.ID, job.ID)
-                err := job.Process(ctx)
+                result, err := job.Process(ctx)
                 if err != nil {
                     fmt.Printf("Worker %d job %d error: %s\n", w.ID, job.ID, err.Error())
                     errs <- err
                 } else {
                     fmt.Printf("Worker %d finished job %d\n", w.ID, job.ID)
+                    results <- Result{JobID: job.ID, Data: result}
                 }
                 w.wg.Done()
             case <-ctx.Done():
@@ -70,10 +77,10 @@ func NewDispatcher(maxWorkers int) *Dispatcher {
 }
 
 // Dispatch starts the dispatcher
-func (d *Dispatcher) Dispatch(ctx context.Context, errs chan<- error) {
+func (d *Dispatcher) Dispatch(ctx context.Context, results chan<- Result, errs chan<- error) {
     for i := 0; i < d.maxWorkers; i++ {
         worker := NewWorker(i+1, &d.wg)
-        worker.Start(ctx, d.jobs, errs)
+        worker.Start(ctx, d.jobs, results, errs)
         fmt.Printf("Worker %d created\n", worker.ID)
     }
 
@@ -101,25 +108,32 @@ func main() {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
 
+    results := make(chan Result)
     errs := make(chan error)
+
+    go func() {
+        for result := range results {
+            fmt.Printf("Job %d result: %v\n", result.JobID, result.Data)
+        }
+    }()
+
     go func() {
         for err := range errs {
             fmt.Println("Error:", err)
         }
     }()
 
-    dispatcher.Dispatch(ctx, errs) // start dispatching jobs with a context
+    dispatcher.Dispatch(ctx, results, errs) // start dispatching jobs with a context
 
     for i := 1; i <= 20; i++ {
         job := Job{
             ID: i,
-            Process: func(jobctx context.Context) error {
+            Process: func(jobctx context.Context) (interface{}, error) {
                 select {
                 case <-time.After(1 * time.Second): // simulate a task
-                    fmt.Println("Job completed:", i)
-                    return nil
+                    return fmt.Sprintf("Job completed: %d", i*2), nil
                 case <-jobctx.Done():
-                    return jobctx.Err()
+                    return nil, jobctx.Err()
                 }
             },
         }
@@ -128,6 +142,7 @@ func main() {
     }
 
     dispatcher.Wait() // wait for all jobs to be processed
+    close(results)
     close(errs)
     fmt.Println("All jobs processed")
 }
