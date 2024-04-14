@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	jobpkg "github.com/mateusmacedo/goether/worker/pkg/job"
+	jobpkg "github.com/mateusmacedo/go-ether/worker/pkg/job"
 )
 
 type Worker struct {
