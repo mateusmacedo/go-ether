@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	jobpkg "github.com/mateusmacedo/go-ether/worker/pkg/job"
-	"github.com/mateusmacedo/go-ether/worker/pkg/worker"
+	jobpkg "github.com/mateusmacedo/go-ether/worker/job"
+	"github.com/mateusmacedo/go-ether/worker/worker"
 )
 
 type WorkerPool interface {

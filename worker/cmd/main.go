@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mateusmacedo/go-ether/worker/pkg/job"
-	"github.com/mateusmacedo/go-ether/worker/pkg/workerpool"
+	"github.com/mateusmacedo/go-ether/worker/job"
+	"github.com/mateusmacedo/go-ether/worker/workerpool"
 )
 
 func dummyExecute(ctx context.Context) (interface{}, error) {
