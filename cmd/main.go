@@ -23,15 +23,16 @@ type Job struct {
 const (
 	JOB_ID_KEY    = "JobID"
 	WORKER_ID_KEY = "WorkerID"
-	MAX_WORKERS   = 6
-	MAX_JOBS      = 30
+	MAX_WORKERS   = 2
+	MAX_JOBS      = 40
 	SHUTDOWN_SIGNAL = -1
+	EXECUTE_DELAY = 2
 )
 
 func NoopExecute(ctx context.Context) (interface{}, error) {
 	workerID, workerOk := ctx.Value(WORKER_ID_KEY).(int)
 	jobID, jobOk := ctx.Value(JOB_ID_KEY).(int)
-	time.Sleep(1 * time.Second) // Simulate work
+	time.Sleep(EXECUTE_DELAY * time.Second) // Simulate work
 	if !workerOk || !jobOk {
 		return nil, fmt.Errorf("context values missing or wrong type: workerID=%v, jobID=%v, workerOk=%t, jobOk=%t", workerID, jobID, workerOk, jobOk)
 	}
