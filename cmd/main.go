@@ -23,16 +23,17 @@ type Job struct {
 const (
 	JOB_ID_KEY    = "JobID"
 	WORKER_ID_KEY = "WorkerID"
-	MAX_WORKERS   = 3
+	MAX_WORKERS   = 6
 	MAX_JOBS      = 30
+	SHUTDOWN_SIGNAL = -1
 )
 
 func NoopExecute(ctx context.Context) (interface{}, error) {
-	workerID := ctx.Value(WORKER_ID_KEY)
-	jobID := ctx.Value(JOB_ID_KEY)
-	time.Sleep(1 * time.Second) // simulate work
-	if workerID == nil || jobID == nil {
-		return nil, fmt.Errorf("context values missing")
+	workerID, workerOk := ctx.Value(WORKER_ID_KEY).(int)
+	jobID, jobOk := ctx.Value(JOB_ID_KEY).(int)
+	time.Sleep(1 * time.Second) // Simulate work
+	if !workerOk || !jobOk {
+		return nil, fmt.Errorf("context values missing or wrong type: workerID=%v, jobID=%v, workerOk=%t, jobOk=%t", workerID, jobID, workerOk, jobOk)
 	}
 	return fmt.Sprintf("Worker: %d completed Job: %d successfully.", workerID, jobID), nil
 }
@@ -46,43 +47,24 @@ type Worker struct {
 	wg *sync.WaitGroup
 }
 
-// func (w *Worker) Start(ctx context.Context, jobs <-chan Job, results chan<- Result, errs chan<- error) {
-// 	for job := range jobs {
-// 		if job.ID == -1 { // shutdown signal
-// 			return
-// 		}
-
-// 		jobCtx := context.WithValue(ctx, JOB_ID_KEY, job.ID)
-// 		jobCtx = context.WithValue(jobCtx, WORKER_ID_KEY, w.ID)
-
-// 		result, err := job.Execute(jobCtx)
-// 		if err != nil {
-// 			errs <- fmt.Errorf("Worker %d: Job %d error: %s", w.ID, job.ID, err)
-// 		} else {
-// 			results <- Result{WorkerID: w.ID, JobID: job.ID, Data: result}
-// 		}
-// 		w.wg.Done()
-// 	}
-// }
-
 func (w *Worker) Start(ctx context.Context, jobs <-chan Job, results chan<- Result, errs chan<- error) {
-    for job := range jobs {
-        if job.ID == -1 { // shutdown signal
-            return
-        }
+	for job := range jobs {
+		if job.ID == SHUTDOWN_SIGNAL {
+			return
+		}
 
-        jobCtx := context.WithValue(ctx, JOB_ID_KEY, job.ID)
-        jobCtx = context.WithValue(jobCtx, WORKER_ID_KEY, w.ID)
+		jobCtx := context.WithValue(ctx, WORKER_ID_KEY, w.ID)
+		jobCtx = context.WithValue(jobCtx, JOB_ID_KEY, job.ID)
 
-        result, err := job.Execute(jobCtx)
-        if err != nil {
-            errs <- fmt.Errorf("Worker %d: Job %d error: %s", w.ID, job.ID, err)
-            w.wg.Done()
-            continue
-        }
-        results <- Result{WorkerID: w.ID, JobID: job.ID, Data: result}
-        w.wg.Done()
-    }
+		result, err := job.Execute(jobCtx)
+		w.wg.Done()
+		if err != nil {
+			errs <- fmt.Errorf("worker %d: job %d error: %s", w.ID, job.ID, err)
+			continue
+		}
+		results <- Result{WorkerID: w.ID, JobID: job.ID, Data: result}
+
+	}
 }
 
 func NewWorker(number int, wg *sync.WaitGroup) Worker {
@@ -100,11 +82,10 @@ type WorkerPool struct {
 
 func NewWorkerPool(maxWorkers int, ctx context.Context) *WorkerPool {
 	pool := &WorkerPool{
-		jobs:       make(chan Job),
-		results:    make(chan Result),
-		errs:       make(chan error),
+		jobs:       make(chan Job, MAX_JOBS),
+		results:    make(chan Result, MAX_JOBS),
+		errs:       make(chan error, MAX_JOBS),
 		maxWorkers: maxWorkers,
-		wg:         sync.WaitGroup{},
 		ctx:        ctx,
 	}
 	return pool
@@ -117,54 +98,27 @@ func (wp *WorkerPool) Run() {
 	}
 }
 
-// func (wp *WorkerPool) SubmitJob(job Job, jobTimeout time.Duration) {
-// 	ctx, cancel := context.WithTimeout(wp.ctx, jobTimeout)
-// 	wp.wg.Add(1)
-// 	wp.jobs <- Job{
-// 		ID: job.ID,
-// 		Execute: func(jobCtx context.Context) (interface{}, error) {
-// 			defer cancel() // ensure resources are freed
-// 			return job.Execute(ctx)
-// 		},
-// 	}
-// }
-
-func (wp *WorkerPool) SubmitJob(job Job, jobTimeout time.Duration) {
-    _, cancel := context.WithTimeout(wp.ctx, jobTimeout)
-    defer cancel()  // It's safe to defer cancel here as it only impacts this submission scope
-    wp.wg.Add(1)
-    wp.jobs <- Job{
-        ID: job.ID,
-        Execute: func(innerCtx context.Context) (interface{}, error) {
-            // Propagate the context with job and worker ID keys
-            return job.Execute(innerCtx)
-        },
-    }
+func (wp *WorkerPool) SubmitJob(job Job) {
+	wp.wg.Add(1)
+	wp.jobs <- job
 }
 
 func (wp *WorkerPool) Shutdown() {
-    for i := 0; i < wp.maxWorkers; i++ {
-        wp.jobs <- Job{ID: -1}  // send shutdown signal
-    }
-    wp.wg.Wait()  // wait for all workers to finish
-    close(wp.jobs)
-    close(wp.results)
-    close(wp.errs)
+	for i := 0; i < wp.maxWorkers; i++ {
+		wp.jobs <- Job{ID: SHUTDOWN_SIGNAL}
+	}
+	close(wp.jobs)
+	close(wp.results)
+	close(wp.errs)
+	log.Println("All jobs have been completed successfully.")
 }
 
 func main() {
 	log.SetOutput(os.Stdout)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	workerPool := NewWorkerPool(MAX_WORKERS, ctx)
-	defer workerPool.Shutdown() // Ensure graceful shutdown
-
-	go func() {
-		for result := range workerPool.results {
-			log.Printf("Result from Worker %d, Job %d: %v\n", result.WorkerID, result.JobID, result.Data)
-		}
-	}()
+	go workerPool.Run()
 
 	go func() {
 		for err := range workerPool.errs {
@@ -172,13 +126,17 @@ func main() {
 		}
 	}()
 
-	go workerPool.Run()
+	go func() {
+		for result := range workerPool.results {
+			log.Printf("Result from Worker %d, Job %d: %v\n", result.WorkerID, result.JobID, result.Data)
+		}
+	}()
 
 	for i := 1; i <= MAX_JOBS; i++ {
-		workerPool.SubmitJob(NewJob(i, NoopExecute), 2*time.Second)
+		job := NewJob(i, NoopExecute)
+		workerPool.SubmitJob(job)
 	}
 
 	workerPool.wg.Wait()
-
-	log.Println("All jobs have been completed successfully.")
+	workerPool.Shutdown()
 }
